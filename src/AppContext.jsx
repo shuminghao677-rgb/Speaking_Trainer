@@ -3,12 +3,20 @@ import { useLocalStorage } from './hooks/useLocalStorage';
 
 const AppContext = createContext();
 
+// Helper: normalize phrase for dedupe (lowercase, trim, remove punctuation except '/')
+const normalizePhrase = (s = '') => {
+  return s.toString()
+    .toLowerCase()
+    .replace(/[^\w\s\/]/g, '') // 去掉标点，但保留斜杠（用于合并短语时的分隔）
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 export const AppProvider = ({ children }) => {
   const [scenes, setScenes] = useLocalStorage('learning_scenes', []);
   const [items, setItems] = useLocalStorage('learning_items', []);
   const [apiKey, setApiKey] = useLocalStorage('deepseek_api_key', '');
   
-  // 底部漂浮提示框的状态
   const [toastMessage, setToastMessage] = useState('');
   const toastTimerRef = useRef(null);
 
@@ -18,71 +26,182 @@ export const AppProvider = ({ children }) => {
     toastTimerRef.current = setTimeout(() => setToastMessage(''), 3000);
   };
 
-  // 新建/删除场景
   const addScene = (name, date) => {
     const newScene = { id: Date.now().toString(), name, date };
     setScenes([newScene, ...scenes]);
   };
+
   const deleteScene = (id) => {
     setScenes(scenes.filter(s => s.id !== id));
-    setItems(items.filter(i => i.sceneId !== id)); // 联动删除
+    setItems(items.filter(i => i.sceneId !== id)); 
   };
 
-  // 添加内容
   const addItem = (sceneId, type, data) => {
     const newItem = {
       id: Date.now().toString(),
       sceneId,
       type,
       category: 'Uncategorized',
+      aiReviewed: false,
+      optionalExtensions: [], // 新增：可选延展
       ...data
     };
     setItems([newItem, ...items]);
   };
 
+  // 防重复添加：如果重复则放入 optionalExtensions
   const addRelatedWord = (itemId, wordObj) => {
     setItems(prevItems => prevItems.map(item => {
       if (item.id === itemId && item.type === 'synonym') {
-        return { ...item, relatedWords: [...(item.relatedWords||[]), wordObj] };
+        const existing = item.relatedWords || [];
+        const normNew = normalizePhrase(wordObj.word);
+        // check duplicates in relatedWords
+        const isDuplicate = existing.some(rw => normalizePhrase(rw.word) === normNew);
+        // also check duplicates in optionalExtensions
+        const existingOptional = item.optionalExtensions || [];
+        const isInOptional = existingOptional.some(o => normalizePhrase(o.phrase) === normNew);
+
+        if (isDuplicate) {
+          // 已存在 -> 移入 optionalExtensions（如果还没在里面）
+          if (!isInOptional) {
+            const newOptional = [...existingOptional, { phrase: wordObj.word, phraseZh: wordObj.zh || '' }];
+            return { ...item, optionalExtensions: newOptional };
+          } else {
+            showToast('该关联词已存在（包括可选项），已忽略重复。');
+            return item;
+          }
+        } else {
+          // 正常添加
+          return { ...item, relatedWords: [...existing, wordObj] };
+        }
       }
       return item;
     }));
   };
 
-  // 🗑️ 【核心黑科技：用 useRef 记录被删除的条目】
   const deletedItemsRef = useRef([]);
 
   const deleteItem = (id) => {
     const itemToDelete = items.find(item => item.id === id);
     if (itemToDelete) {
-      deletedItemsRef.current.push(itemToDelete); // 存入“垃圾桶”
+      deletedItemsRef.current.push(itemToDelete); 
       showToast('已删除，按 Cmd + Z (或 Ctrl + Z) 撤销 ↩️');
     }
     setItems(items.filter(item => item.id !== id));
   };
 
-  const updateCategories = (categoryMap) => {
+  // 接收并覆盖新格式的数据，同时做去重并把被删的候选移入 optionalExtensions
+  const updateCategories = (aiResultMap) => {
     setItems(prevItems => 
-      prevItems.map(item => 
-        categoryMap[item.id] ? { ...item, category: categoryMap[item.id] } : item
-      )
+      prevItems.map(item => {
+        const aiData = aiResultMap[item.id];
+        if (aiData) {
+          // collect optionalExtensions starting from existing ones
+          const optionalExtensions = [...(item.optionalExtensions || [])];
+
+          // helper: process relatedGroups returned by AI -> dedupe phrases globally for this item
+          const processedRelatedGroups = (aiData.relatedGroups || []).map(group => {
+            const seen = new Set();
+            const newItems = [];
+
+            (group.items || []).forEach(gItem => {
+              const norm = normalizePhrase(gItem.phrase || '');
+              if (!norm) return;
+              if (seen.has(norm)) {
+                // 重复项，放入 optionalExtensions（保留原始字段）
+                if (!optionalExtensions.some(o => normalizePhrase(o.phrase) === norm)) {
+                  optionalExtensions.push({
+                    phrase: gItem.phrase,
+                    phraseZh: gItem.phraseZh || '',
+                    example: gItem.example || '',
+                    exampleZh: gItem.exampleZh || ''
+                  });
+                }
+              } else {
+                seen.add(norm);
+                newItems.push(gItem);
+              }
+            });
+
+            return {
+              ...group,
+              items: newItems
+            };
+          });
+
+          // 对已有的 item.relatedWords 做去重（用户手动加入的），并把重复项移到 optionalExtensions
+          let dedupedRelatedWords = [];
+          const seenRw = new Set();
+          (item.relatedWords || []).forEach(rw => {
+            const norm = normalizePhrase(rw.word || rw.phrase || '');
+            if (!norm) return;
+            if (seenRw.has(norm)) {
+              // 重复 -> optionalExtensions
+              if (!optionalExtensions.some(o => normalizePhrase(o.phrase) === norm)) {
+                optionalExtensions.push({ phrase: rw.word || rw.phrase, phraseZh: rw.zh || '' });
+              }
+            } else {
+              seenRw.add(norm);
+              dedupedRelatedWords.push(rw);
+            }
+          });
+
+          // 最后把 optionalExtensions 去重（以规范化后为准）
+          const finalOptional = [];
+          const seenOpt = new Set();
+          optionalExtensions.forEach(o => {
+            const norm = normalizePhrase(o.phrase || '');
+            if (!seenOpt.has(norm)) {
+              seenOpt.add(norm);
+              finalOptional.push(o);
+            }
+          });
+
+          // 共享 common fields
+          const common = {
+            aiReviewed: true,
+            category: aiData.category || item.category || 'Uncategorized',
+            subCategoryEnglish: aiData.subCategory || aiData.subCategoryEnglish || item.subCategoryEnglish || '',
+            subCategoryZh: aiData.subCategoryZh || item.subCategoryZh || ''
+          };
+
+          if (item.type === 'expression' || item.type === 'template') {
+             return { 
+               ...item, 
+               ...common,
+               content: aiData.correctedText || item.content, 
+               chunks: aiData.chunks || item.chunks || '',
+               relatedGroups: processedRelatedGroups || item.relatedGroups || [],
+               optionalExtensions: finalOptional,
+               relatedWords: dedupedRelatedWords
+             };
+          }
+          if (item.type === 'synonym') {
+             return { 
+               ...item, 
+               ...common,
+               baseWord: aiData.mainWord || aiData.correctedText || item.baseWord,
+               relatedGroups: processedRelatedGroups || item.relatedGroups || [],
+               optionalExtensions: finalOptional,
+               relatedWords: dedupedRelatedWords
+             };
+          }
+        }
+        return item;
+      })
     );
   };
 
-  // ⌨️ 【监听全局键盘事件：Cmd+Z / Ctrl+Z】
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-        // 如果用户正在输入框里打字，让他用系统自带的撤销打字，不要触发恢复条目
         const activeTag = document.activeElement.tagName;
         if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
 
-        // 如果不在输入框里，且垃圾桶里有东西，执行恢复！
         if (deletedItemsRef.current.length > 0) {
-          e.preventDefault(); // 阻止浏览器默认行为
-          const lastDeleted = deletedItemsRef.current.pop();
-          setItems(prev => [lastDeleted, ...prev]);
-          showToast('✨ 撤销成功！已恢复刚才删除的内容。');
+          const itemToRestore = deletedItemsRef.current.pop();
+          setItems(prev => [itemToRestore, ...prev]);
+          showToast('恢复成功 🌟');
         }
       }
     };
@@ -91,16 +210,13 @@ export const AppProvider = ({ children }) => {
   }, [setItems]);
 
   return (
-    <AppContext.Provider value={{ 
-      scenes, addScene, deleteScene, 
-      items, addItem, deleteItem, addRelatedWord, updateCategories,
-      apiKey, setApiKey 
+    <AppContext.Provider value={{
+      scenes, items, apiKey, setApiKey,
+      addScene, deleteScene, addItem, deleteItem, updateCategories, addRelatedWord
     }}>
       {children}
-      
-      {/* 漂浮提示框 UI */}
       {toastMessage && (
-        <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl z-50 text-sm font-medium animate-bounce-in">
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl z-50 text-sm font-medium animate-fade-in-up">
           {toastMessage}
         </div>
       )}

@@ -66,8 +66,20 @@ export default function SceneDetail() {
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
           <h2 className="text-lg font-bold text-indigo-800 mb-4">句型模板 Templates</h2>
           <div className="flex gap-2 mb-4">
-            <input value={templateStr} onChange={e => setTemplateStr(e.target.value)} placeholder="输入英文，如：I'd like to..." className="flex-[2] px-4 py-2 bg-gray-50 border rounded-lg" />
-            <input value={templateZh} onChange={e => setTemplateZh(e.target.value)} placeholder="中文释义(选填)" className="flex-1 px-4 py-2 bg-gray-50 border rounded-lg text-sm" />
+            <input 
+              value={templateStr} 
+              onChange={e => setTemplateStr(e.target.value)} 
+              placeholder="输入英文，如：I'd like to..." 
+              className="flex-[2] px-4 py-2 bg-gray-50 border rounded-lg"
+              inputMode="url" 
+              lang="en"
+            />
+            <input 
+              value={templateZh} 
+              onChange={e => setTemplateZh(e.target.value)} 
+              placeholder="中文释义(选填)" 
+              className="flex-1 px-4 py-2 bg-gray-50 border rounded-lg text-sm" 
+            />
             <button onClick={() => handleAddSimple('template', templateStr, templateZh, setTemplateStr, setTemplateZh)} className="px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg font-medium">添加</button>
           </div>
           <div className="space-y-2">
@@ -86,8 +98,20 @@ export default function SceneDetail() {
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
           <h2 className="text-lg font-bold text-emerald-800 mb-4">日常表达 Expressions</h2>
           <div className="flex gap-2 mb-4">
-            <input value={expressionStr} onChange={e => setExpressionStr(e.target.value)} placeholder="输入英文，如：Keep the change." className="flex-[2] px-4 py-2 bg-gray-50 border rounded-lg" />
-            <input value={expressionZh} onChange={e => setExpressionZh(e.target.value)} placeholder="中文释义(选填)" className="flex-1 px-4 py-2 bg-gray-50 border rounded-lg text-sm" />
+            <input 
+              value={expressionStr} 
+              onChange={e => setExpressionStr(e.target.value)} 
+              placeholder="输入英文，如：Keep the change." 
+              className="flex-[2] px-4 py-2 bg-gray-50 border rounded-lg" 
+              inputMode="url" 
+              lang="en"
+            />
+            <input 
+              value={expressionZh} 
+              onChange={e => setExpressionZh(e.target.value)} 
+              placeholder="中文释义(选填)" 
+              className="flex-1 px-4 py-2 bg-gray-50 border rounded-lg text-sm" 
+            />
             <button onClick={() => handleAddSimple('expression', expressionStr, expressionZh, setExpressionStr, setExpressionZh)} className="px-4 py-2 bg-emerald-100 text-emerald-700 rounded-lg font-medium">添加</button>
           </div>
           <div className="space-y-2">
@@ -106,8 +130,20 @@ export default function SceneDetail() {
         <div className="bg-white p-6 rounded-xl border border-gray-100 shadow-sm">
           <h2 className="text-lg font-bold text-amber-800 mb-4">同义词 Synonyms</h2>
           <div className="flex gap-2 mb-6">
-            <input value={baseWord} onChange={e => setBaseWord(e.target.value)} placeholder="输入基准词 (如：Happy)" className="flex-[2] px-4 py-2 bg-gray-50 border rounded-lg" />
-            <input value={baseWordZh} onChange={e => setBaseWordZh(e.target.value)} placeholder="中文释义(选填)" className="flex-1 px-4 py-2 bg-gray-50 border rounded-lg text-sm" />
+            <input 
+              value={baseWord} 
+              onChange={e => setBaseWord(e.target.value)} 
+              placeholder="输入基准词，如：recipe*" 
+              className="flex-[2] px-4 py-2 bg-gray-50 border rounded-lg" 
+              inputMode="url" 
+              lang="en"
+            />
+            <input 
+              value={baseWordZh} 
+              onChange={e => setBaseWordZh(e.target.value)} 
+              placeholder="中文释义(选填)" 
+              className="flex-1 px-4 py-2 bg-gray-50 border rounded-lg text-sm" 
+            />
             <button onClick={handleCreateSynonymGroup} className="px-4 py-2 bg-amber-100 text-amber-700 rounded-lg font-medium whitespace-nowrap">新建词组</button>
           </div>
           
@@ -131,9 +167,11 @@ export default function SceneDetail() {
                   <input 
                     value={newRelated[item.id] || ''} 
                     onChange={e => setNewRelated({...newRelated, [item.id]: e.target.value})} 
-                    placeholder="关联英文..." 
+                    placeholder="关联英文(可加*注音标)..." 
                     className="flex-[2] px-3 py-1 text-sm bg-white border border-gray-200 rounded-md focus:outline-none focus:border-amber-400"
                     onKeyDown={e => e.key === 'Enter' && handleAddRelated(item.id)}
+                    inputMode="url" 
+                    lang="en"
                   />
                   <input 
                     value={newRelatedZh[item.id] || ''} 
