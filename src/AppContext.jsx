@@ -1,3 +1,4 @@
+// src/AppContext.jsx
 import React, { createContext, useContext, useRef, useState } from 'react';
 import { useLocalStorage } from './hooks/useLocalStorage';
 
@@ -46,6 +47,19 @@ export const AppProvider = ({ children }) => {
     }));
   };
 
+  // 🆕 新增：删除同义词组里的特定关联词
+  const removeRelatedWord = (itemId, wordToRemove) => {
+    setItems(items.map(item => {
+      if (item.id === itemId && item.type === 'synonym') {
+        return {
+          ...item,
+          relatedWords: (item.relatedWords || []).filter(w => w.word !== wordToRemove)
+        };
+      }
+      return item;
+    }));
+  };
+
   const addScene = (name, date) => { 
     const newScene = { id: Date.now().toString(), name, date }; 
     setScenes([newScene, ...scenes]); 
@@ -77,6 +91,7 @@ export const AppProvider = ({ children }) => {
           aiReviewed: true,
           category: aiData.category || item.category || 'Uncategorized',
           categoryZh: aiData.categoryZh || item.categoryZh || '',
+          grammarNote: aiData.grammarNote || item.grammarNote || '', 
           subCategory: aiData.subCategory || item.subCategory || '',
           subCategoryZh: aiData.subCategoryZh || item.subCategoryZh || '',
           word: aiData.word || item.word || item.content || item.baseWord || '',
@@ -92,28 +107,36 @@ export const AppProvider = ({ children }) => {
     });
   };
 
-  // 临时大洗牌功能：全部退回未分类，等待新 AI 规则接管
   const resetAllCategories = () => {
-    if (window.confirm('🧨 确定要将所有数据重置为【未分类】吗？\n这会让它们可以重新接受新版 AI 的“三轨并行”解析！')) {
+    if (window.confirm('🧨 确定要将所有数据重置为【未分类】吗？')) {
       setItems(prevItems => {
         return (prevItems || []).map(item => ({
-          ...item,
-          category: 'Uncategorized',
-          categoryZh: '',
-          subCategory: '',
-          subCategoryZh: '',
-          aiReviewed: false 
+          ...item, category: 'Uncategorized', categoryZh: '', grammarNote: '', subCategory: '', subCategoryZh: '', aiReviewed: false 
         }));
       });
-      showToast('洗牌完成！已全部重置为未分类 🔀');
+      showToast('已全部重置为未分类 🔀');
+    }
+  };
+
+  const resetItemsCategory = (ids) => {
+    if (window.confirm('🔄 确定要将本组重置为【未分类】以便重新测试 AI 吗？')) {
+      setItems(prevItems => {
+        return (prevItems || []).map(item => {
+          if (ids.includes(item.id)) {
+             return { ...item, category: 'Uncategorized', categoryZh: '', grammarNote: '', subCategory: '', subCategoryZh: '', aiReviewed: false, relatedPhrases: [], synonyms: [], sentence: '', sentenceZh: '' };
+          }
+          return item;
+        });
+      });
+      showToast('本组已重置为未分类 ↺');
     }
   };
 
   return (
     <AppContext.Provider value={{
       scenes, items, apiKey, setApiKey,
-      addScene, deleteScene, addItem, deleteItem, addRelatedWord,
-      updateCategories, resetAllCategories, showToast
+      addScene, deleteScene, addItem, deleteItem, addRelatedWord, removeRelatedWord, // 🆕 导出了新方法
+      updateCategories, resetAllCategories, resetItemsCategory, showToast
     }}>
       {children}
       {toastMessage && (

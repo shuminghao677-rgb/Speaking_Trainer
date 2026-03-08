@@ -1,12 +1,12 @@
+// src/pages/LibraryPage.jsx
 import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../AppContext';
 import { categorizeItemsCoarse, categorizeItemsWithAI } from '../utils/deepseek';
 
-const PROMPT_VERSION = 'v4_ultimate';
+const PROMPT_VERSION = 'v11_subcategory_clean_ui'; // 更新版本号
 
 export default function LibraryPage({ title = 'Library', type = 'expression', colorClass = '' }) {
-  // 💡 注意：这里已经删除了 resetAllCategories
-  const { scenes, items, updateCategories, deleteItem, apiKey, setApiKey } = useAppContext();
+  const { scenes, items, updateCategories, deleteItem, apiKey, setApiKey, resetItemsCategory } = useAppContext();
   const [loading, setLoading] = useState(false);
   const [expandedItems, setExpandedItems] = useState({});
   const [processedGroups, setProcessedGroups] = useState(() => {
@@ -18,9 +18,7 @@ export default function LibraryPage({ title = 'Library', type = 'expression', co
         return {};
       }
       return JSON.parse(localStorage.getItem('processedGroups') || '{}');
-    } catch {
-      return {};
-    }
+    } catch { return {}; }
   });
 
   useEffect(() => {
@@ -57,25 +55,17 @@ export default function LibraryPage({ title = 'Library', type = 'expression', co
 
   const handleCoarseCategorize = async () => {
     const unCategorizedItems = libraryItems.filter((item) => !item.category || item.category === 'Uncategorized');
-    if (unCategorizedItems.length === 0) {
-      alert('太棒了！当前库所有内容都已分配了大类！');
-      return;
-    }
+    if (unCategorizedItems.length === 0) return alert('当前库所有内容都已分配了大类！');
     const currentKey = requireApiKey();
     if (!currentKey) return;
-
     const existingCategories = [...new Set(libraryItems.map((i) => i.category).filter((c) => c && c !== 'Uncategorized'))];
 
     setLoading(true);
     try {
       const categoryMap = await categorizeItemsCoarse(unCategorizedItems, existingCategories, currentKey);
       updateCategories(categoryMap);
-    } catch (error) {
-      console.error('粗分失败：', error);
-      alert(`分配大类失败: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
+    } catch (error) { alert(`分配大类失败: ${error.message}`); } 
+    finally { setLoading(false); }
   };
 
   const handleDeepDiveCategory = async (category, catItems) => {
@@ -87,30 +77,49 @@ export default function LibraryPage({ title = 'Library', type = 'expression', co
       const detailMap = await categorizeItemsWithAI(catItems, currentKey);
       updateCategories(detailMap);
       setProcessedGroups(prev => ({ ...prev, [category]: true }));
-    } catch (e) {
-      console.error('深度解析失败：', e);
-      alert(`解析失败: ${e.message}`);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { alert(`解析失败: ${e.message}`); } 
+    finally { setLoading(false); }
   };
 
-  // ====== 渲染核心区 ======
+  const renderCompactList = (dataList) => {
+    if (!dataList || dataList.length === 0) return null;
+    return (
+      <div className="mt-2 space-y-1.5">
+        {dataList.map((line, i) => {
+          const match = line.match(/^\[(.*?)\]\s*(.*)/);
+          if (match) {
+            return (
+              <div key={i} className="flex flex-col sm:flex-row sm:items-start text-[13px] leading-relaxed bg-sky-50/60 px-2 py-1.5 rounded-sm border border-sky-100/60">
+                <span className="shrink-0 text-sky-700 font-bold mr-2 mb-1 sm:mb-0">
+                  [{match[1].trim()}]
+                </span>
+                <span className="flex flex-wrap items-center">
+                  {match[2].split(',').map((chunk, idx, arr) => {
+                    const wordMatch = chunk.match(/(.*?)\((.*?)\)/);
+                    return (
+                      <span key={idx} className="mr-1.5">
+                        <span className="text-slate-900 font-medium">{wordMatch ? wordMatch[1].trim() : chunk.trim()}</span>
+                        {wordMatch && <span className="text-slate-500 text-[11px] ml-1">({wordMatch[2].trim()})</span>}
+                        {idx < arr.length - 1 && <span className="text-slate-300 ml-1">,</span>}
+                      </span>
+                    );
+                  })}
+                </span>
+              </div>
+            );
+          }
+          return <div key={i} className="text-[13px] text-slate-600 before:content-['•'] before:mr-1.5">{line}</div>;
+        })}
+      </div>
+    );
+  };
 
-  // 1. 渲染意群切片 (Template 专属交替底色)
   const renderChunks = (chunksStr) => {
     if (!chunksStr) return null;
     return (
-      <div className="flex flex-wrap gap-1 mb-2">
+      <div className="flex flex-wrap gap-1 mb-1">
         {chunksStr.split('/').map((chunk, idx) => (
-          <span 
-            key={idx} 
-            className={`px-2.5 py-1 rounded-md text-base font-bold shadow-sm border ${
-              idx % 2 === 0 
-                ? 'bg-blue-50 text-blue-900 border-blue-100' 
-                : 'bg-slate-50 text-slate-800 border-slate-200'
-            }`}
-          >
+          <span key={idx} className={`px-2 py-0.5 rounded-sm text-sm font-bold shadow-sm border ${idx % 2 === 0 ? 'bg-blue-50 text-blue-900 border-blue-100' : 'bg-slate-50 text-slate-800 border-slate-200'}`}>
             {chunk.trim()}
           </span>
         ))}
@@ -118,65 +127,12 @@ export default function LibraryPage({ title = 'Library', type = 'expression', co
     );
   };
 
-  // 2. 渲染意图拆解标签 (Expression 专属)
-  const renderIntents = (phrases) => {
-    if (!phrases || phrases.length === 0) return null;
-    return (
-      <div className="mt-3 flex flex-col gap-2">
-        {phrases.map((phraseLine, i) => {
-          const match = phraseLine.match(/^\[(.*?)\](.*)/);
-          if (match) {
-            return (
-              <div key={i} className="flex items-start gap-2 text-sm">
-                <span className="bg-indigo-50 text-indigo-600 border border-indigo-100 px-2 py-0.5 rounded shadow-sm whitespace-nowrap font-medium text-xs">
-                  {match[1].trim()}
-                </span>
-                <span className="text-slate-700 mt-0.5 font-medium">{match[2].trim()}</span>
-              </div>
-            );
-          }
-          return <div key={i} className="text-sm text-slate-600 before:content-['•'] before:mr-2">{phraseLine}</div>;
-        })}
-      </div>
-    );
-  };
-
-  // 3. 渲染带语境辨析的同义词 (Synonym 专属)
-  const renderSynonyms = (synonyms) => {
-    if (!synonyms || synonyms.length === 0) return null;
-    return (
-      <div className="flex flex-wrap gap-2 mt-3">
-        {synonyms.map((syn, i) => {
-          const match = syn.match(/^(.*?)\s*\((.*?)\)$/);
-          if (match) {
-            return (
-              <span key={i} className="px-2.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-sm shadow-sm flex items-center gap-1.5 hover:bg-amber-100 transition-colors cursor-default">
-                <span className="font-bold">{match[1].trim()}</span>
-                <span className="text-xs text-amber-700 bg-amber-200/50 px-1.5 py-0.5 rounded-md">{match[2].trim()}</span>
-              </span>
-            );
-          }
-          return (
-            <span key={i} className="px-2.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-sm shadow-sm font-bold hover:bg-amber-100 transition-colors cursor-default">
-              {syn}
-            </span>
-          );
-        })}
-      </div>
-    );
-  };
-
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 min-h-[calc(100vh-6rem)]">
+    <div className="bg-white p-4 md:p-6 rounded-xl shadow-sm border border-gray-100 min-h-[calc(100vh-6rem)]">
       <div className="flex justify-between items-center border-b border-gray-100 pb-4 mb-6">
         <h2 className={`text-2xl font-bold ${colorClass}`}>{title}</h2>
         <div className="flex gap-3">
-          {/* 洗牌按钮已彻底删除，清爽！ */}
-          <button
-            onClick={handleCoarseCategorize}
-            disabled={loading}
-            className="px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-all shadow-sm flex items-center gap-2"
-          >
+          <button onClick={handleCoarseCategorize} disabled={loading} className="px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-700 disabled:opacity-50 transition-all shadow-sm">
             {loading ? '🧠 AI 处理中...' : '✨ 仅分配大类 (防截断)'}
           </button>
         </div>
@@ -187,113 +143,128 @@ export default function LibraryPage({ title = 'Library', type = 'expression', co
       ) : (
         <div className="space-y-8">
           {Object.entries(groupedItems).map(([category, catItems]) => {
-            const isProcessed = !!(processedGroups && processedGroups[category]);
-            const catZh = catItems.find(i => i.categoryZh)?.categoryZh || '';
+            
+            // 按 subCategory 进行二级分组
+            const subGroupedItems = catItems.reduce((acc, item) => {
+              const subCat = item.subCategory ? item.subCategory : '📌 待解析/其他';
+              if (!acc[subCat]) acc[subCat] = [];
+              acc[subCat].push(item);
+              return acc;
+            }, {});
 
             return (
               <div key={category} className="mb-8">
-                <div className="flex justify-between items-center mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100 shadow-sm">
-                  <h3 className="text-lg font-bold text-gray-800 border-l-4 border-blue-500 pl-3 flex items-center gap-2">
-                    {category === 'Uncategorized' ? '📦 未分类待处理' : category}
-                    {catZh && <span className="text-gray-500 font-normal text-sm">{catZh}</span>}
-                    <span className="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">{catItems.length}</span>
-                  </h3>
-
-                  {category !== 'Uncategorized' && !isProcessed && (
-                    <button
-                      onClick={() => handleDeepDiveCategory(category, catItems)}
-                      disabled={loading}
-                      className="text-sm font-medium bg-white text-blue-600 px-4 py-1.5 rounded-md border border-blue-200 hover:bg-blue-50 hover:shadow active:scale-95 transition-all"
-                    >
-                      {loading ? '处理中...' : '✨ 深度解析本组 (拆解+造句)'}
+                {/* 大类头部 */}
+                <div className="flex justify-between items-center mb-5 bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-lg font-bold text-slate-800 border-l-4 border-slate-700 pl-3 flex items-center gap-2">
+                      {category === 'Uncategorized' ? '📦 未分类待处理' : category}
+                      <span className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded-full shadow-sm">{catItems.length}</span>
+                    </h3>
+                    {category !== 'Uncategorized' && (
+                      <button onClick={() => resetItemsCategory(catItems.map(i => i.id))} className="text-[12px] text-slate-400 hover:text-red-500 transition-colors ml-2">
+                        ↺ 重置此组测试
+                      </button>
+                    )}
+                  </div>
+                  {category !== 'Uncategorized' && (
+                    <button onClick={() => handleDeepDiveCategory(category, catItems)} disabled={loading} className="text-xs font-bold bg-white text-blue-600 px-4 py-2 rounded-md border border-blue-200 hover:bg-blue-50 transition-all shadow-sm">
+                      {loading ? '处理中...' : '✨ 深度解析本组'}
                     </button>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {catItems.map((item) => {
-                    const displayWord = item.word || item.content || item.baseWord || '';
-                    const displayZh = item.chinese || item.zh || item.baseWordZh || '';
-                    const displaySynonyms = item.synonyms?.length ? item.synonyms : (item.relatedWords?.map(r=>r.word) || []);
-                    
-                    return (
-                      <div key={item.id} className="p-5 bg-white border border-gray-200 rounded-xl group relative transition-all hover:shadow-lg hover:border-blue-300">
-                        {/* 原场景标签作为小小的溯源参考 */}
-                        <div className="mb-2">
-                           <div className="inline-block text-[10px] text-gray-400 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded border border-gray-100">
-                             Source: {getSceneName(item.sceneId)}
-                           </div>
-                        </div>
+                {/* 🌟 二级分组：清爽色系卡片式渲染 */}
+                <div className="space-y-5">
+                  {Object.entries(subGroupedItems)
+                    .sort(([a], [b]) => {
+                      if (a === '📌 待解析/其他') return 1;
+                      if (b === '📌 待解析/其他') return -1;
+                      return 0;
+                    })
+                    .map(([subCat, subItems]) => {
+                      const isParsed = subCat !== '📌 待解析/其他';
+                      
+                      // 🌟 去掉红底，改为清爽的莫兰迪灰白/淡灰蓝色包裹，依然保留高级的分界感
+                      const wrapperClass = isParsed 
+                        ? "bg-slate-50/60 border border-slate-200/80 p-4 sm:p-5 rounded-2xl shadow-sm" 
+                        : "pt-2";
 
-                        <div className="pr-12">
-                          {/* 渲染主词/意群 */}
-                          {item.type === 'template' && item.chunks ? (
-                            renderChunks(item.chunks)
-                          ) : (
-                            <div className="font-bold text-xl text-slate-800 mb-1">{displayWord}</div>
+                      return (
+                        <div key={subCat} className={wrapperClass}>
+                          
+                          {/* 霸气大标题 */}
+                          {isParsed && (
+                            <div className="flex items-center gap-4 mb-5 pl-1">
+                              <h4 className="text-[17px] font-black text-slate-800 tracking-wide">
+                                {subCat}
+                              </h4>
+                              <div className="h-[2px] bg-slate-200/80 flex-1 rounded-full"></div>
+                            </div>
                           )}
-                          
-                          {/* 中文释义 */}
-                          {displayZh && <div className="text-sm text-slate-500 font-medium">{displayZh}</div>}
-                          
-                          {/* 意图拆解与同义词渲染 */}
-                          {item.type === 'expression' && renderIntents(item.relatedPhrases)}
-                          {item.type === 'synonym' && renderSynonyms(displaySynonyms)}
-                        </div>
 
-                        {/* 展开区域：神仙例句与同构平替 */}
-                        {(item.sentence || item.relatedExpressions?.length > 0) && (
-                          <div className="mt-5 pt-4 border-t border-gray-100">
-                            <button
-                              onClick={() => toggleExpand(item.id)}
-                              className="text-sm text-blue-600 font-bold hover:text-blue-800 flex items-center gap-1"
-                            >
-                              {expandedItems[item.id] ? '🔼 收起深度解析' : '📖 展开深度解析与神仙造句'}
-                            </button>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+                            {subItems.map((item) => {
+                              const displayData = item.type === 'expression' ? item.relatedPhrases : (item.synonyms?.length ? item.synonyms : []);
+                              
+                              const borderClass = isParsed ? "border-slate-200/60" : "border-slate-100";
 
-                            {expandedItems[item.id] && (
-                              <div className="mt-4 space-y-4 animate-fade-in-up">
-                                
-                                {/* 融合神句 */}
-                                {item.sentence && (
-                                  <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                                    <div className="text-xs font-bold text-blue-500 mb-2 uppercase tracking-wider flex items-center gap-1">
-                                      <span>🌟</span> Contextual Weaving
+                              return (
+                                <div key={item.id} className={`py-3 border-b ${borderClass} group relative`}>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-baseline gap-2">
+                                      {item.type === 'template' && item.chunks ? renderChunks(item.chunks) : <span className="font-bold text-base text-slate-800">{item.word || item.content || item.baseWord}</span>}
+                                      <span className="text-xs text-slate-400 font-medium">{item.chinese || item.zh || item.baseWordZh}</span>
                                     </div>
-                                    <div className="text-slate-800 font-medium leading-relaxed italic">"{item.sentence}"</div>
-                                    {item.sentenceZh && <div className="text-sm text-slate-500 mt-2">{item.sentenceZh}</div>}
+                                    <div className="text-[9px] text-slate-300 uppercase tracking-wider hidden group-hover:block">{getSceneName(item.sceneId)}</div>
                                   </div>
-                                )}
-                                
-                                {/* 句型平替 */}
-                                {item.type === 'template' && item.relatedExpressions?.length > 0 && (
-                                  <div>
-                                    <div className="text-xs font-bold text-emerald-500 mb-2 uppercase tracking-wider flex items-center gap-1">
-                                      <span>🔄</span> Parallel Structure (同构平替)
+
+                                  {item.type === 'template' && item.grammarNote && (
+                                    <div className="text-[12px] text-indigo-600 bg-white/80 px-2 py-1 rounded-sm border border-indigo-100 mb-2 mt-1 flex items-start gap-1">
+                                      <span className="mt-[1px]">💡</span><span>{item.grammarNote}</span>
                                     </div>
-                                    <div className="flex flex-col gap-2">
-                                      {item.relatedExpressions.map((expr, i) => (
-                                        <div key={i} className="text-sm text-emerald-800 bg-emerald-50 px-3 py-2 rounded-md border border-emerald-100 font-medium">
-                                          {expr}
+                                  )}
+
+                                  {renderCompactList(displayData)}
+
+                                  {(item.sentence || item.relatedExpressions?.length > 0) && (
+                                    <div className="mt-2.5">
+                                      <button onClick={() => toggleExpand(item.id)} className="text-[11px] text-blue-500 font-medium hover:text-blue-700">
+                                        {expandedItems[item.id] ? '🔼 收起' : '📖 语境造句/平替'}
+                                      </button>
+                                      {expandedItems[item.id] && (
+                                        <div className="mt-2 space-y-2">
+                                          {item.sentence && (
+                                            <div className="bg-white/80 p-2 rounded-sm border-l-2 border-blue-300 shadow-sm">
+                                              <div className="text-[12px] text-slate-700 italic leading-snug">"{item.sentence}"</div>
+                                              {item.sentenceZh && <div className="text-[10px] text-slate-400 mt-1">{item.sentenceZh}</div>}
+                                            </div>
+                                          )}
+                                          {item.type === 'template' && item.relatedExpressions?.length > 0 && (
+                                            <div className="flex flex-col gap-1.5 mt-2">
+                                              {item.relatedExpressions.map((expr, i) => {
+                                                const match = expr.match(/(.*?)\((.*?)\)/);
+                                                return (
+                                                  <div key={i} className="text-[12px] text-emerald-800 bg-white/90 px-2 py-1.5 rounded-sm border border-emerald-100 flex flex-col shadow-sm">
+                                                    <span className="font-medium">🔄 {match ? match[1].trim() : expr}</span>
+                                                    {match && <span className="text-[11px] text-emerald-600/80 ml-5 mt-0.5">{match[2].trim()}</span>}
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
                                         </div>
-                                      ))}
+                                      )}
                                     </div>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                                  )}
+                                  <button onClick={() => deleteItem(item.id)} className="absolute top-2 right-0 text-[10px] text-red-400 opacity-0 group-hover:opacity-100 hover:text-red-600 transition-all bg-white/90 rounded px-1">删除</button>
+                                </div>
+                              );
+                            })}
                           </div>
-                        )}
-
-                        <button
-                          onClick={() => deleteItem(item.id)}
-                          className="absolute top-4 right-4 text-xs text-red-400 opacity-0 group-hover:opacity-100 bg-white px-2 py-1 rounded shadow-sm border border-red-100 hover:bg-red-50 hover:text-red-600 transition-all"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    );
-                  })}
+                        </div>
+                      );
+                    })}
                 </div>
               </div>
             );
